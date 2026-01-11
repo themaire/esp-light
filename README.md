@@ -4,6 +4,35 @@ Système d'éclairage LED contrôlable avec interface tactile pour photographie.
 
 Projet non terminé car il reste à concevoir la partie à imprimer en 3D qui servira de boitier / support.
 
+## 📋 Prérequis
+
+### Environnement de développement
+- **Visual Studio Code** : Éditeur de code recommandé
+- **Extension PlatformIO IDE** : Pour la compilation et l'upload du firmware ESP8266
+- **Python 3** : Requis par PlatformIO (version 3.7 ou supérieure)
+- **Drivers USB** : CH340/CP2102 pour la communication série avec le Wemos D1 Mini
+
+### Système d'exploitation
+- macOS 15.1.1 (testé et validé)
+- Compatible Linux et Windows
+
+### Installation
+```bash
+# 1. Installer VS Code
+# Télécharger depuis: https://code.visualstudio.com/
+
+# 2. Installer l'extension PlatformIO
+# Dans VS Code: Extensions (Cmd+Shift+X) → Rechercher "PlatformIO IDE" → Installer
+
+# 3. Créer l'environnement Python virtuel (optionnel mais recommandé)
+python3 -m venv venv
+source venv/bin/activate  # Sur macOS/Linux
+# venv\Scripts\activate   # Sur Windows
+
+# 4. Installer les outils Python
+pip install platformio esptool
+```
+
 ## 🎥 Vidéo de démonstration
 
 [![Démonstration ESP Light](https://img.youtube.com/vi/Rhpj27oxEJo/maxresdefault.jpg)](https://www.youtube.com/watch?v=Rhpj27oxEJo)
@@ -17,32 +46,35 @@ Projet non terminé car il reste à concevoir la partie à imprimer en 3D qui se
 - **Contrôle tactile** : Interface graphique intuitive sur écran TFT 2.4" (240x320 pixels)
 - **16 LEDs WS2812B** : Anneau RGB addressable avec contrôle individuel
 - **Intensité variable** : De 1 à 16 LEDs allumées progressivement
+- **Puissance réglable** : Slider tactile avec 10 niveaux de luminosité (10%-100%)
 - **Balance des blancs** : 3 températures de couleur (3000K / 5000K / 6500K)
 - **Mode ON/OFF** : Activation/désactivation instantanée
 - **Calibration tactile** : Mapping précis entre écran LCD et capteur tactile XPT2046
 
 ## 📦 Hardware
 
-- **Microcontrôleur** : ESP8266 (Wemos D1 Mini) - 80MHz, 80KB RAM, 4MB Flash
-- **Écran** : LOLIN TFT 2.4" Shield (ILI9341 240x320, 16-bit color)
-- **Capteur tactile** : XPT2046 (résistif, nécessite calibration)
-- **LEDs** : Anneau 16 LEDs WS2812B sur GPIO4 (D2)
-- **Port série** : `/dev/tty.usbserial-0206A689` @ 115200 bauds
+- **Microcontrôleur** : [ESP8266 (Wemos D1 Mini)](https://fr.aliexpress.com/item/32529101036.html) - 80MHz, 80KB RAM, 4MB Flash
+- **Écran** : [LOLIN TFT 2.4" Shield (ILI9341 240x320, 16-bit color)](https://fr.aliexpress.com/item/32919729730.html?pdp_npi=4%40dis%21EUR%21€%2017%2C04%21€%2016%2C99%21%21%2119.38%2119.32%21%4021038e4017681636976566811db158%2166057397051%21sh%21FR%211709736453%21X&spm=a2g0o.store_pc_home.productList_2009695634913.32919729730&gatewayAdapt=glo2fra)
+- **Capteur tactile (intégré dans l'écran LILIN TFT)** : XPT2046 (résistif, nécessite calibration)
+- **LEDs** : [Anneau 16 LEDs WS2812B](https://fr.aliexpress.com/item/1005007748593752.html) sur GPIO4 (D2)
+- **Port série** : `/dev/tty.usbserial-0206A689` (sur mon ordinateur) @ 115200 bauds
 
 ## 🎨 Interface
 
 ### Contrôles disponibles
-- **ON/OFF** (rouge) : Allumer/éteindre toutes les LEDs
+- **ON/OFF** (rouge/vert) : Allumer/éteindre toutes les LEDs
 - **+** (vert) : Augmenter le nombre de LEDs actives (1-16)
 - **-** (orange) : Diminuer le nombre de LEDs actives (1-16)
-- **◀** (cyan) : Température précédente (Froid → Neutre → Chaud)
-- **▶** (cyan) : Température suivante (Chaud → Neutre → Froid)
+- **◀** (gris) : Température précédente (Froid → Neutre → Chaud)
+- **▶** (gris) : Température suivante (Chaud → Neutre → Froid)
+- **Slider de puissance** (en bas) : 10 segments tactiles pour ajuster la luminosité de 10% à 100% par pas de 10%. Le segment actif est affiché en doré, les autres en gris foncé.
 
 ### Affichage en temps réel
 - État du système : "LEDs ON" / "LEDs OFF"
 - Nombre de LEDs actives : "X/16 LEDs"
 - Température actuelle : "Chaud (3000K)" / "Neutre (5000K)" / "Froid (6500K)"
-- Aperçu couleur : Cercle de prévisualisation en bas de l'écran
+- Puissance : Affichage du pourcentage sous le slider (ex: "50%")
+- Aperçu couleur : Cercle de prévisualisation de la température actuelle
 
 ### Température de couleur
 | Mode | Kelvin | Couleur | Usage |
@@ -60,31 +92,44 @@ Le capteur tactile **XPT2046** utilise son propre système de coordonnées qui *
 - Résolution native différente
 - Possible inversion d'axes (X/Y)
 
-### Processus de calibration
+### Transformation automatique
+Le projet utilise une **transformation affine** pour convertir automatiquement les coordonnées graphiques en coordonnées tactiles. Plus besoin de calibrer manuellement chaque bouton!
+
+#### Coefficients de calibration actuels
+```cpp
+struct TouchCalibration {
+    float scaleX = -1.02;    // Inversion X + compression
+    float scaleY = 1.05;     // Légère expansion Y
+    int16_t offsetX = 326;   // Décalage X
+    int16_t offsetY = -4;    // Décalage Y
+};
+```
+
+#### Positions des boutons (auto-calibrées)
+```cpp
+// Les coordonnées tactiles sont calculées automatiquement via screenToTouch()
+Button btnOnOff(20, 10, 80, 50, "ON/OFF", TFT_RED);
+Button btnPlus(170, 10, 40, 50, "+", TFT_GREEN);
+Button btnMinus(120, 10, 40, 50, "-", TFT_ORANGE);
+Button btnTempLeft(30, 90, 50, 50, "<", TFT_DARKGREY);
+Button btnTempRight(160, 90, 50, 50, ">", TFT_DARKGREY);
+```
+
+### Recalibration (si nécessaire)
+Si vous devez ajuster la calibration pour votre écran :
 1. Activer le mode debug : `debugTouch = true`
 2. Compiler et uploader le firmware
-3. Toucher les 4 coins de chaque bouton et noter les coordonnées affichées
-4. Calculer la zone tactile : 
-   - `touchX = min(X observés)`
-   - `touchY = min(Y observés)`
-   - `touchW = max(X) - min(X)`
-   - `touchH = max(Y) - min(Y)`
-5. Mettre à jour les structures `Button` avec les nouvelles coordonnées
+3. Toucher plusieurs boutons et noter les coordonnées affichées
+4. Calculer les nouveaux coefficients :
+   - `scaleX = (touchX2 - touchX1) / (screenX2 - screenX1)`
+   - `scaleY = (touchY2 - touchY1) / (screenY2 - screenY1)`
+   - `offsetX` et `offsetY` : ajuster pour centrer
+5. Mettre à jour la structure `TouchCalibration`
 6. Désactiver le mode debug : `debugTouch = false`
-
-### Coordonnées actuelles (calibrées)
-```cpp
-// Position graphique (x, y, largeur, hauteur) vs tactile (touchX, touchY, touchW, touchH)
-Button btnOnOff    = {20,  80, 80, 50,  226, 83,  73, 48, "ON/OFF", TFT_RED};
-Button btnPlus     = {120, 80, 40, 50,  111, 84,  41, 49, "+",      TFT_GREEN};
-Button btnMinus    = {170, 80, 40, 50,  164, 80,  38, 51, "-",      TFT_ORANGE};
-Button btnTempLeft = {30,  160, 50, 50, 114, 170, 49, 41, "<",      TFT_CYAN};
-Button btnTempRight= {160, 160, 50, 50, 243, 163, 46, 51, ">",      TFT_CYAN};
-```
 
 ## 🚀 Installation
 
-### 1. Environnement Python
+### 1. Environnement Python (comme cité au tout debut du README)
 ```bash
 python3 -m venv venv
 source venv/bin/activate
@@ -106,7 +151,7 @@ pio device monitor --baud 115200
 ## 📁 Structure du projet
 
 ```
-selfie-light/
+esp-light/
 ├── platformio.ini      # Configuration PlatformIO
 ├── src/
 │   └── main.cpp       # Code source principal
@@ -160,12 +205,15 @@ struct ColorPreset {
     uint8_t r, g, b;
 };
 
-// Structure pour boutons avec double mapping
+// Structure pour boutons avec double mapping et auto-calibration
 struct Button {
-    int16_t x, y, w, h;              // Coordonnées graphiques (LCD)
-    int16_t touchX, touchY, touchW, touchH;  // Coordonnées tactiles (capteur)
+    int16_t x, y, w, h;                    // Coordonnées graphiques (LCD)
+    int16_t touchX, touchY, touchW, touchH; // Coordonnées tactiles (XPT2046)
     const char* label;
     uint16_t color;
+    
+    // Constructeur qui calcule automatiquement les coordonnées tactiles
+    Button(int16_t px, int16_t py, int16_t pw, int16_t ph, const char* lbl, uint16_t col);
 };
 ```
 
