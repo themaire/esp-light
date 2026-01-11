@@ -4,6 +4,7 @@ Système d'éclairage LED contrôlable avec interface tactile pour photographie.
 
 ![](./picts/UI_1.jpg)
 ![](./picts/UI_2.jpg)
+![](./picts/UI_3.jpg)
 
 ## 🎯 Caractéristiques
 
