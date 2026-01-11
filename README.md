@@ -1,4 +1,4 @@
-# EDP Light - Éclairage Photo (comme un)Professionnel
+# ESP Light - Éclairage Photo (comme un)Professionnel
 
 Système d'éclairage LED contrôlable avec interface tactile pour photographie.
 
