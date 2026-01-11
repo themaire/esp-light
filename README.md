@@ -51,13 +51,26 @@ pip install platformio esptool
 - **Mode ON/OFF** : Activation/désactivation instantanée
 - **Calibration tactile** : Mapping précis entre écran LCD et capteur tactile XPT2046
 
+### 🆕 Version LVGL (ESP32 uniquement)
+- **Interface moderne** : Bibliothèque graphique avancée LVGL 8.4.0
+- **Performance optimale** : 33 FPS constants avec 0% CPU
+- **Texte blanc** : Contraste amélioré sur fond d'image
+- **Image de fond** : Support d'images personnalisées (RGB565, 189×240px)
+- **Mémoire** : 48KB alloués pour LVGL + 2 buffers écran
+- **Fonts** : Montserrat 14/16/18/20/24 pour un rendu professionnel
+
 ## 📦 Hardware
 
 ### Microcontrôleurs supportés
-- **ESP8266** : [Wemos D1 Mini](https://fr.aliexpress.com/item/32529101036.html) - 80MHz, 80KB RAM, 4MB Flash ✅ *Testé et validé*
-- **ESP32** : [WEMOS LOLIN D32 PRO](https://fr.aliexpress.com/item/32883116057.html) - 240MHz, 520KB RAM, 4MB Flash ⚠️ *À tester* (voir [BUILD.md](BUILD.md) pour la configuration)
+- **ESP8266** : [Wemos D1 Mini](https://fr.aliexpress.com/item/32529101036.html) - 80MHz, 80KB RAM, 4MB Flash ✅ **Testé et validé** avec TFT_eSPI
+- **ESP32** : [WEMOS LOLIN D32 PRO](https://fr.aliexpress.com/item/32883116057.html) - 240MHz dual-core, 520KB RAM, 4MB Flash + 4MB PSRAM ✅ **Testé et validé** avec TFT_eSPI et LVGL 8.4.0 (33 FPS @ 0% CPU)
 ### Affichage et LEDs
 - **Écran** : [LOLIN TFT 2.4" Shield (ILI9341 240x320, 16-bit color)](https://fr.aliexpress.com/item/32919729730.html?pdp_npi=4%40dis%21EUR%21€%2017%2C04%21€%2016%2C99%21%21%2119.38%2119.32%21%4021038e4017681636976566811db158%2166057397051%21sh%21FR%211709736453%21X&spm=a2g0o.store_pc_home.productList_2009695634913.32919729730&gatewayAdapt=glo2fra)
+  - Résolution: 320×240 pixels RGB565
+  - Contrôleur: ILI9341 (SPI 27MHz)
+  - Tactile: XPT2046 résistif
+  - Câble: SH1.0-10P pour ESP32 (plug-and-play) ⚠️ **Important** : Bien enfoncer le câble, les connecteurs SH1.0 peuvent se desserrer
+  - Compatible ESP8266 et ESP32
 - **Capteur tactile (intégré dans l'écran LOLIN TFT)** : XPT2046 (résistif, nécessite calibration)
 - **Câble SPI Wemos (avec le D32 PRO sur son connecteur dédié)** [TFT e-Paper Cable 10P 200mm 20cm for WEMOS SH1.0 10P double head cable](https://fr.aliexpress.com/item/32848833474.html?pdp_npi=4%40dis%21EUR%21€%201%2C42%21€%201%2C42%21%21%211.62%211.62%21%400b88ac9117681662923822001d3b83%2165172187020%21sh%21FR%211709736453%21X&spm=a2g0o.store_pc_home.productList_2009695634917.32848833474&gatewayAdapt=glo2fra)
 - **LEDs** : [Anneau 16 LEDs WS2812B](https://fr.aliexpress.com/item/1005007748593752.html) sur GPIO4 (D2 pour ESP8266) ou GPIO23 (ESP32)
@@ -145,7 +158,7 @@ pip install platformio esptool
 
 ### 2. Compilation et Upload
 
-#### Pour ESP8266 (D1 Mini)
+#### Pour ESP8266 (D1 Mini) - TFT_eSPI
 ```bash
 # Compiler
 pio run -e d1_mini
@@ -157,7 +170,7 @@ pio run -e d1_mini -t upload
 pio device monitor -e d1_mini
 ```
 
-#### Pour ESP32 (LOLIN D32 PRO)
+#### Pour ESP32 (LOLIN D32 PRO) - TFT_eSPI
 ⚠️ **Important** : Vérifier et adapter les pins dans `platformio.ini` avant de compiler !
 
 ```bash
@@ -174,17 +187,39 @@ pio run -e lolin_d32_pro -t upload
 pio device monitor -e lolin_d32_pro
 ```
 
+#### Pour ESP32 (LOLIN D32 PRO) - LVGL 8.4.0 (Interface avancée) ⭐ RECOMMANDÉ
+**Environnement recommandé** pour profiter de l'interface moderne avec image de fond et performance optimale.
+
+```bash
+# Nettoyer le cache (OBLIGATOIRE)
+pio run -t clean
+
+# Compiler l'environnement LVGL
+pio run -e lolin_d32_pro_lvgl
+
+# Compiler et uploader
+pio run -e lolin_d32_pro_lvgl -t upload
+
+# Moniteur série
+pio device monitor -e lolin_d32_pro_lvgl
+```
+# Moniteur série
+pio device monitor -e lolin_d32_pro_lvgl
+```
+
 📖 **Guide complet** : Voir [BUILD.md](BUILD.md) pour les détails de configuration ESP32.
 
 ## 📁 Structure du projet
 
 ```
-esp-light/
-├── platformio.ini      # Configuration PlatformIO
+selfie-light/
+├── platformio.ini      # Configuration PlatformIO (3 environnements)
 ├── src/
-│   └── main.cpp       # Code source principal
+│   ├── main.cpp       # Code source principal (ESP8266 + ESP32)
+│   └── fond_lvgl_small.c  # Image de fond LVGL (189×240 RGB565)
 ├── include/
-│   └── lv_conf.h      # Configuration LVGL (non utilisée)
+│   ├── lv_conf.h      # Configuration LVGL 8.4.0
+│   └── images.h       # Déclarations d'images LVGL
 ├── lib/               # Bibliothèques locales
 ├── test/              # Tests unitaires
 └── venv/              # Environnement Python
@@ -243,20 +278,45 @@ L'écran a 18 pins mais le câble n'en utilise que 10 car :
 
 ## 📚 Bibliothèques utilisées
 
+### ESP8266 (environnement `d1_mini`)
 - `TFT_eSPI@2.5.43` : Driver d'écran ILI9341 optimisé pour ESP8266
 - `FastLED@3.5.0` : Contrôle des LEDs WS2812B (version compatible GCC 4.8.2)
 
+### ESP32 avec TFT_eSPI (environnement `lolin_d32_pro`)
+- `TFT_eSPI@2.5.43` : Driver d'écran ILI9341 compatible ESP32
+- `FastLED@3.5.0` : Contrôle des LEDs WS2812B
+
+### ESP32 avec LVGL (environnement `lolin_d32_pro_lvgl`) ⭐
+- `LVGL@8.4.0` : Bibliothèque graphique avancée (Light and Versatile Graphics Library)
+- `TFT_eSPI@2.5.43` : Driver utilisé par LVGL pour le rendu matériel
+- `FastLED@3.5.0` : Contrôle des LEDs WS2812B
+- **Performance** : 33 FPS constants @ 0% CPU
+- **Mémoire** : 48KB LVGL + 2×(320×10) buffers écran
+- **Fonctionnalités** : Fonts Montserrat, images RGB565, widgets tactiles
+
 ## ⚙️ Architecture technique
 
-### Mémoire
+### ESP8266 (D1 Mini)
 - **RAM totale** : 80KB (utilisation ~34% = 28KB)
 - **Flash** : 4MB (utilisation ~31% = 324KB)
-- **Contrainte** : Pas de LVGL possible (trop gourmand en RAM)
+- **Contrainte** : Pas de LVGL possible (bibliothèque trop gourmande en RAM)
+- **Communication** : 
+  - **SPI** : Écran TFT (27MHz)
+  - **Tactile** : XPT2046 via TFT_eSPI
+  - **LEDs** : Protocol WS2812B (timing précis 800kHz)
 
-### Communication
-- **SPI** : Écran TFT (27MHz)
-- **Tactile** : XPT2046 via TFT_eSPI
-- **LEDs** : Protocol WS2812B (timing précis 800kHz)
+### ESP32 (LOLIN D32 PRO)
+- **RAM totale** : 520KB SRAM + 4MB PSRAM externe
+- **Flash** : 4MB
+- **Avantage** : Support LVGL 8.4.0 avec excellente performance
+- **Performance LVGL** :
+  - 33 FPS constants
+  - 0% CPU en idle
+  - Utilisation mémoire : ~76KB (48KB LVGL + 26KB buffers + 2KB tactile)
+- **Communication** :
+  - **SPI** : Écran TFT (27MHz)
+  - **Tactile** : XPT2046 avec calibration affine inversée
+  - **LEDs** : Protocol WS2812B sur GPIO25
 
 ### Structure du code
 ```cpp
@@ -281,26 +341,107 @@ struct Button {
 
 ## 💡 Utilisation
 
-1. Connecter l'anneau de LEDs sur D2 (GPIO4)
-2. Monter le shield TFT sur le D1 Mini
+### ESP8266 ou ESP32 avec TFT_eSPI
+1. Connecter l'anneau de LEDs : **GPIO4** (ESP8266 D2) ou **GPIO25** (ESP32)
+2. Monter le shield TFT :
+   - **ESP8266** : Connexion directe sur D1 Mini
+   - **ESP32** : Câble SH1.0-10P sur connecteur TFT_LCD
 3. Alimenter via USB ou batterie
 4. Utiliser l'interface tactile pour contrôler l'éclairage
 
-## 🎬 Application Photo
+### ESP32 avec LVGL (Interface avancée)
+1. Suivre les mêmes étapes de connexion matérielle
+2. Compiler et uploader l'environnement `lolin_d32_pro_lvgl`
+3. Profiter de l'interface moderne avec :
+   - Texte blanc contrasté
+   - Image de fond personnalisée
+   - Performance fluide (33 FPS)
+   - Fonts Montserrat professionnelles
 
-Idéal pour :
-- Selfies et portraits
-- Vidéos YouTube/streaming
-- Éclairage d'appoint macro
-- Éclairage de studio mobile
+## 🔧 Personnalisation de l'image de fond (LVGL)
+
+### Convertir votre image
+1. Aller sur [LVGL Image Converter](https://lvgl.io/tools/imageconverter)
+2. Charger votre image (PNG, JPG, etc.)
+3. Paramètres recommandés :
+   - **Name** : `fond_lvgl_small` (ou autre nom)
+   - **Color format** : `True color` (RGB565, pas d'alpha)
+   - **Output format** : `C array`
+   - **LVGL version** : `v8.x`
+4. Télécharger le fichier `.c` généré
+
+### Intégrer dans le projet
+1. Remplacer [src/fond_lvgl_small.c](src/fond_lvgl_small.c) par votre fichier
+2. Mettre à jour [include/images.h](include/images.h) si le nom change :
+   ```cpp
+   LV_IMG_DECLARE(votre_nom_image);
+   ```
+3. Mettre à jour [src/main.cpp](src/main.cpp) ligne ~140 :
+   ```cpp
+   lv_img_set_src(img, &votre_nom_image);
+   ```
+4. Recompiler et uploader
+
+### Résolution recommandée
+- Largeur max : **189 pixels** (position X=120)
+- Hauteur max : **240 pixels** (écran complet)
+- Format : **RGB565** (pas de transparence, devient noir)
+
+## 🛠️ Dépannage
+
+### Écran gris ou noir (ESP32)
+**Symptôme** : L'écran reste gris ou ne s'allume pas.  
+**Cause** : Câble SH1.0-10P mal enfoncé.  
+**Solution** : Débrancher et rebrancher fermement le câble sur les deux connecteurs (D32 PRO et écran). Les connecteurs SH1.0 peuvent se desserrer facilement.
+
+### IntelliSense ne trouve pas LVGL
+**Symptôme** : Squiggles rouges sous `lv_obj.h` dans VS Code.  
+**Solution** : Créer `.vscode/settings.json` :
+```json
+{
+    "platformio.autoPreloadEnvName": "lolin_d32_pro_lvgl",
+    "C_Cpp.default.configurationProvider": "platformio.platformio-ide"
+}
+```
+Puis faire **Reload Window** dans VS Code.
+
+### Erreurs de compilation d'images LVGL
+**Symptôme** : Erreurs avec `cf`, `header`, ou `lv_image_dsc_t`.  
+**Cause** : Format LVGL v9 incompatible avec v8.  
+**Solution** : Régénérer l'image avec le convertisseur LVGL en sélectionnant **v8.x** et **True color** (pas d'alpha).
+
+### Image affichée noire ou flashing
+**Symptôme** : L'image s'affiche toute noire ou l'écran clignote.  
+**Cause** : Format avec alpha (`CF_TRUE_COLOR_ALPHA`) incompatible RGB565.  
+**Solution** : Utiliser **True color** sans alpha. Les zones transparentes deviennent noires.
+
+### Touch X inversé
+**Symptôme** : Les touches à gauche activent celles à droite.  
+**Cause** : Axe X inversé sur certains écrans XPT2046.  
+**Solution** : Le code utilise déjà une transformation affine avec `scaleX = -1.02`. Vérifier [main.cpp ligne 62](src/main.cpp#L62-L68).
 
 ## 📝 Développé avec
 
 - **IDE** : Visual Studio Code + PlatformIO
-- **Framework** : Arduino pour ESP8266
-- **Langage** : C++
+- **Framework** : Arduino pour ESP8266 et ESP32
+- **Langage** : C++ (Arduino Core)
+- **Bibliothèques graphiques** : TFT_eSPI (ESP8266/ESP32) et LVGL 8.4.0 (ESP32 uniquement)
 
-## 🎨 Couleurs TFT_eSPI disponibles
+## � Application Photo
+
+Idéal pour :
+- **Selfies et portraits** : Éclairage frontal doux et ajustable
+- **Vidéos YouTube/streaming** : Ring light professionnel
+- **Éclairage d'appoint macro** : Photographie de petits objets
+- **Éclairage de studio mobile** : Contrôle précis température/intensité
+
+### Avantages de l'interface LVGL (ESP32)
+- Interface tactile moderne et professionnelle
+- Réglages rapides avec slider et boutons
+- Aperçu visuel de la couleur sélectionnée
+- Performance fluide sans latence (33 FPS)
+
+## �🎨 Couleurs TFT_eSPI disponibles
 
 Couleurs prédéfinies de la bibliothèque TFT_eSPI (format RGB565) :
 

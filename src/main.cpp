@@ -1,73 +1,35 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+#include <lvgl.h>
 #include <FastLED.h>
 
+#include "images.h"
+
 // ===== CONFIGURATION MULTI-PLATEFORME =====
-// Détection automatique du microcontrôleur
 #if defined(ESP8266_BOARD)
     #define MCU_NAME "ESP8266 (D1 Mini)"
     // LED_PIN défini dans platformio.ini (GPIO4 = D2)
 #elif defined(ESP32_BOARD)
     #define MCU_NAME "ESP32 (LOLIN D32 PRO)"
-    // LED_PIN défini dans platformio.ini (GPIO23 par défaut)
+    // LED_PIN défini dans platformio.ini (GPIO25)
 #else
     #error "Plateforme non supportée ! Utiliser ESP8266_BOARD ou ESP32_BOARD"
 #endif
 
-// Écran TFT LOLIN 2.4"
+// Écran TFT
 TFT_eSPI tft = TFT_eSPI();
 
 // LEDs WS2812B
-#define NUM_LEDS 16         // Anneau de 16 LEDs
+#define NUM_LEDS 16
 CRGB leds[NUM_LEDS];
 
-// Variables globales - État du système
+// Variables globales
 bool ledsOn = false;
 uint8_t numLedsActive = 16;  // Nombre de LEDs allumées (1-16)
-uint8_t colorTemp = 2;       // Température: 0=chaud, 1=neutre, 2=froid
-uint8_t brightness = 10;     // Puissance: 1-10 (10%-100%, par pas de 10%)
-bool debugTouch = false;     // Activer le debug pour recalibrer
+uint8_t colorTemp = 1;       // Température: 0=chaud, 1=neutre, 2=froid
+uint8_t brightness = 10;     // Puissance: 1-10 (10%-100%)
 
-// Variables pour répétition automatique au maintien du doigt
-unsigned long lastActionTime = 0;
-unsigned long touchStartTime = 0;
-int lastTouchButton = -1;  // -1=aucun, 0=onoff, 1=plus, 2=minus, 3=tempLeft, 4=tempRight
-const unsigned long REPEAT_INITIAL_DELAY = 500;  // Délai avant première répétition (ms)
-const unsigned long REPEAT_RATE = 150;            // Délai entre répétitions (ms)
-
-// ===== CALIBRATION TACTILE =====
-// Points de référence pour transformation affine (basés sur calibration manuelle)
-// Ces valeurs doivent être ajustées si le comportement tactile change
-struct TouchCalibration {
-    float scaleX, scaleY;    // Facteurs d'échelle
-    int16_t offsetX, offsetY; // Offsets
-} touchCal = {
-    -1.02,  // scaleX (inversion X + compression)
-    1.05,   // scaleY (légère expansion Y)
-    326,    // offsetX
-    -4      // offsetY
-};
-
-// Fonction de transformation: coordonnées écran → coordonnées tactiles
-void screenToTouch(int16_t screenX, int16_t screenY, int16_t screenW, int16_t screenH,
-                   int16_t &touchX, int16_t &touchY, int16_t &touchW, int16_t &touchH) {
-    // Transformation affine du centre
-    int16_t centerScreenX = screenX + screenW / 2;
-    int16_t centerScreenY = screenY + screenH / 2;
-    
-    int16_t centerTouchX = centerScreenX * touchCal.scaleX + touchCal.offsetX;
-    int16_t centerTouchY = centerScreenY * touchCal.scaleY + touchCal.offsetY;
-    
-    // Transformation des dimensions (valeur absolue car X peut être inversé)
-    touchW = abs(screenW * touchCal.scaleX);
-    touchH = abs(screenH * touchCal.scaleY);
-    
-    // Calcul du coin supérieur gauche de la zone tactile
-    touchX = centerTouchX - touchW / 2;
-    touchY = centerTouchY - touchH / 2;
-}
-
-// Températures de couleur (RGB)
+// Températures de couleur
 struct ColorPreset {
     const char* name;
     int kelvin;
@@ -75,44 +37,78 @@ struct ColorPreset {
 };
 
 ColorPreset colorTemps[] = {
-    {"Chaud",  3000, 255, 147, 41},  // Orange/doré
+    {"Chaud",  3000, 255, 147, 41},   // Orange/doré
     {"Neutre", 5000, 255, 214, 170},  // Blanc naturel
     {"Froid",  6500, 201, 226, 255}   // Bleuté
 };
 
-// Boutons de l'interface
-struct Button {
-    int16_t x, y, w, h;
-    int16_t touchX, touchY, touchW, touchH;
-    const char* label;
-    uint16_t color;
-    
-    // Constructeur qui calcule automatiquement les coordonnées tactiles
-    Button(int16_t px, int16_t py, int16_t pw, int16_t ph, const char* lbl, uint16_t col) 
-        : x(px), y(py), w(pw), h(ph), label(lbl), color(col) {
-        screenToTouch(x, y, w, h, touchX, touchY, touchW, touchH);
-    }
+// Calibration tactile avec inversion X
+struct TouchCalibration {
+    float scaleX, scaleY;
+    int16_t offsetX, offsetY;
+} touchCal = {
+    -1.02,  // scaleX négatif = inversion X
+    1.05,   // scaleY
+    326,    // offsetX
+    -4      // offsetY
 };
 
-// Définition des boutons (les coordonnées tactiles sont auto-calculées!)
-Button btnOnOff(20, 10, 80, 50, "ON/OFF", TFT_RED);
-Button btnPlus(170, 10, 40, 50, "+", TFT_GREEN);
-Button btnMinus(120, 10, 40, 50, "-", TFT_ORANGE);
-Button btnTempLeft(30, 90, 50, 50, "<", TFT_DARKGREY);
-Button btnTempRight(160, 90, 50, 50, ">", TFT_DARKGREY);
+// Buffers LVGL
+static lv_disp_draw_buf_t draw_buf;
+static lv_color_t buf1[320 * 10];  // Buffer pour 10 lignes
+static lv_color_t buf2[320 * 10];
 
-// ===== FONCTIONS =====
+// Objets LVGL
+lv_obj_t *btnOnOff;
+lv_obj_t *btnPlus;
+lv_obj_t *btnMinus;
+lv_obj_t *labelLedCount;
+lv_obj_t *btnTempLeft;
+lv_obj_t *btnTempRight;
+lv_obj_t *labelTemp;
+lv_obj_t *labelTempValue;
+lv_obj_t *colorPreview;
+lv_obj_t *slider;
+lv_obj_t *labelBrightness;
 
-// ===== FONCTIONS =====
+// Fonction de flush pour LVGL
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+    uint32_t w = (area->x2 - area->x1 + 1);
+    uint32_t h = (area->y2 - area->y1 + 1);
 
-bool isTouchInButton(Button &btn, uint16_t touchX, uint16_t touchY) {
-    return (touchX >= btn.touchX && touchX <= (btn.touchX + btn.touchW) &&
-            touchY >= btn.touchY && touchY <= (btn.touchY + btn.touchH));
+    tft.startWrite();
+    tft.setAddrWindow(area->x1, area->y1, w, h);
+    tft.pushColors((uint16_t *)&color_p->full, w * h, true);
+    tft.endWrite();
+
+    lv_disp_flush_ready(disp);
 }
 
+// Fonction de lecture tactile pour LVGL (avec calibration affine)
+void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data) {
+    uint16_t rawX, rawY;
+    bool touched = tft.getTouch(&rawX, &rawY);
+
+    if (touched) {
+        // Application de la transformation affine inverse
+        // Pour retrouver les coordonnées écran depuis les coordonnées tactiles
+        // touchX = screenX * scaleX + offsetX
+        // donc screenX = (touchX - offsetX) / scaleX
+        int16_t screenX = (rawX - touchCal.offsetX) / touchCal.scaleX;
+        int16_t screenY = (rawY - touchCal.offsetY) / touchCal.scaleY;
+        
+        data->state = LV_INDEV_STATE_PR;
+        data->point.x = screenX;
+        data->point.y = screenY;
+    } else {
+        data->state = LV_INDEV_STATE_REL;
+    }
+}
+
+// Mise à jour des LEDs
 void updateLEDs() {
-    // Appliquer la puissance (brightness 1-10 = 10%-100%)
-    FastLED.setBrightness(brightness * 25.5); // 10*25.5=255
+    // Appliquer la puissance
+    FastLED.setBrightness(brightness * 25.5);  // 10*25.5=255
     
     if (!ledsOn) {
         fill_solid(leds, NUM_LEDS, CRGB::Black);
@@ -120,7 +116,6 @@ void updateLEDs() {
         ColorPreset ct = colorTemps[colorTemp];
         CRGB color = CRGB(ct.r, ct.g, ct.b);
         
-        // Allumer seulement le nombre de LEDs actives
         for (uint8_t i = 0; i < NUM_LEDS; i++) {
             if (i < numLedsActive) {
                 leds[i] = color;
@@ -132,272 +127,315 @@ void updateLEDs() {
     FastLED.show();
 }
 
-void drawSlider() {
-    // Position du slider
-    int16_t sliderY = 180;
-    int16_t sliderX = 20;
-    int16_t sliderW = 280;
-    int16_t sliderH = 30;
-    int16_t segmentW = sliderW / 10;
-    
-    // Titre
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextDatum(TL_DATUM);
-    tft.drawString("Puissance", sliderX, sliderY - 20, 2);
-    
-    // Dessiner les 10 segments
-    for (int i = 0; i < 10; i++) {
-        int16_t segX = sliderX + i * segmentW;
-        uint16_t segColor = TFT_DARKGREY;
+// Callback pour le bouton ON/OFF
+void onoff_btn_event(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED) {
+        ledsOn = !ledsOn;
         
-        // Segment actuel = curseur doré
-        if (i == brightness - 1) {
-            segColor = TFT_GOLD;
+        // Changer la couleur et le texte du bouton
+        lv_obj_t *label = lv_obj_get_child(btnOnOff, 0);
+        if (ledsOn) {
+            lv_obj_set_style_bg_color(btnOnOff, lv_color_hex(0x00AA00), 0);  // Vert
+            lv_label_set_text(label, "ON");
+            Serial.println("LEDs ON");
+        } else {
+            lv_obj_set_style_bg_color(btnOnOff, lv_color_hex(0xAA0000), 0);  // Rouge
+            lv_label_set_text(label, "OFF");
+            Serial.println("LEDs OFF");
         }
-        
-        tft.fillRoundRect(segX + 2, sliderY, segmentW - 4, sliderH, 4, segColor);
+        updateLEDs();
     }
-    
-    // Afficher le pourcentage
-    tft.setTextDatum(TC_DATUM);
-    String percent = String(brightness * 10) + "%";
-    tft.drawString(percent, sliderX + sliderW / 2, sliderY + sliderH + 5, 2);
 }
 
-bool isTouchInSlider(uint16_t touchX, uint16_t touchY, uint8_t &newBrightness) {
-    // Zone du slider en coordonnées écran
-    int16_t sliderY = 180;
-    int16_t sliderX = 20;
-    int16_t sliderW = 280;
-    int16_t sliderH = 30;
-    
-    // Transformer en coordonnées tactiles
-    int16_t tX, tY, tW, tH;
-    screenToTouch(sliderX, sliderY, sliderW, sliderH, tX, tY, tW, tH);
-    
-    // Vérifier si dans la zone
-    if (touchX >= tX && touchX <= (tX + tW) &&
-        touchY >= tY && touchY <= (tY + tH)) {
-        
-        // Calculer quel segment (1-10)
-        // IMPORTANT: L'axe X est inversé (scaleX négatif), donc on inverse le calcul
-        int16_t relativeX = abs(touchX - tX);
-        int16_t segmentW = tW / 10;
-        newBrightness = 10 - (relativeX / segmentW);  // Inversion pour compenser scaleX négatif
-        if (newBrightness > 10) newBrightness = 10;
-        if (newBrightness < 1) newBrightness = 1;
-        
-        return true;
+// Callback pour le bouton +
+void plus_btn_event(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED) {
+        if (numLedsActive < 16) {
+            numLedsActive++;
+            String count = String(numLedsActive) + "/16";
+            lv_label_set_text(labelLedCount, count.c_str());
+            Serial.print("LEDs actives: ");
+            Serial.println(numLedsActive);
+            updateLEDs();
+        }
     }
-    return false;
 }
 
-void drawButton(Button &btn, bool pressed = false) {
-    uint16_t color = pressed ? TFT_DARKGREY : btn.color;
-    tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 8, color);
-    tft.setTextColor(TFT_WHITE);
-    tft.setTextDatum(MC_DATUM);
-    
-    // Texte plus épais (simuler le gras en dessinant plusieurs fois)
-    int16_t centerX = btn.x + btn.w/2;
-    int16_t centerY = btn.y + btn.h/2;
-    tft.drawString(btn.label, centerX, centerY, 4);
-    tft.drawString(btn.label, centerX+1, centerY, 4);
+// Callback pour le bouton -
+void minus_btn_event(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED) {
+        if (numLedsActive > 1) {
+            numLedsActive--;
+            String count = String(numLedsActive) + "/16";
+            lv_label_set_text(labelLedCount, count.c_str());
+            Serial.print("LEDs actives: ");
+            Serial.println(numLedsActive);
+            updateLEDs();
+        }
+    }
 }
 
-void drawInterface() {
-    tft.fillScreen(TFT_BLACK);
-    
-    // État ON/OFF
-    btnOnOff.color = ledsOn ? TFT_GREEN : TFT_RED;
-    btnOnOff.label = ledsOn ? "ON" : "OFF";
-    drawButton(btnOnOff);
-    
-    // Boutons quantité
-    drawButton(btnPlus);
-    drawButton(btnMinus);
-    
-    // Info quantité
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString("LEDs", 240, 20, 2);
-    String ledCount = String(numLedsActive) + "/16";
-    tft.drawString(ledCount, 240, 40, 2);
-    
-    // Boutons température
-    drawButton(btnTempLeft);
-    drawButton(btnTempRight);
-    
-    // Info température
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("Temp", 120, 90, 2);
-    ColorPreset ct = colorTemps[colorTemp];
-    tft.drawString(ct.name, 120, 110, 2);
-    String kelvin = String(ct.kelvin) + "K";
-    tft.drawString(kelvin, 120, 125, 2);
-    
-    // Aperçu couleur
-    tft.fillCircle(120, 150, 15, tft.color565(ct.r, ct.g, ct.b));
-    
-    // Slider de puissance
-    drawSlider();
+// Callback pour le bouton température gauche (<)
+void temp_left_btn_event(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED) {
+        if (colorTemp > 0) {
+            colorTemp--;
+            ColorPreset ct = colorTemps[colorTemp];
+            lv_label_set_text(labelTempValue, ct.name);
+            
+            // Changer la couleur de l'aperçu
+            lv_obj_set_style_bg_color(colorPreview, lv_color_make(ct.r, ct.g, ct.b), 0);
+            
+            Serial.print("Température: ");
+            Serial.println(ct.name);
+            updateLEDs();
+        }
+    }
 }
 
-// ===== SETUP & LOOP =====
+// Callback pour le bouton température droite (>)
+void temp_right_btn_event(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED) {
+        if (colorTemp < 2) {
+            colorTemp++;
+            ColorPreset ct = colorTemps[colorTemp];
+            lv_label_set_text(labelTempValue, ct.name);
+            
+            // Changer la couleur de l'aperçu
+            lv_obj_set_style_bg_color(colorPreview, lv_color_make(ct.r, ct.g, ct.b), 0);
+            
+            Serial.print("Température: ");
+            Serial.println(ct.name);
+            updateLEDs();
+        }
+    }
+}
+
+// Callback pour le slider
+void slider_event(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        int32_t value = lv_slider_get_value(slider);
+        brightness = value;
+        
+        String percent = String(brightness * 10) + "%";
+        lv_label_set_text(labelBrightness, percent.c_str());
+        
+        Serial.print("Puissance: ");
+        Serial.print(brightness * 10);
+        Serial.println("%");
+        
+        updateLEDs();
+    }
+}
 
 void setup() {
     Serial.begin(115200);
     delay(100);
-    Serial.println("\n=== Selfie Light Pro ===");
-    Serial.print("Microcontrôleur: ");
+    Serial.println("\n=== Selfie Light LVGL ===");
+    Serial.print("MCU: ");
     Serial.println(MCU_NAME);
     Serial.print("LED Pin: GPIO");
     Serial.println(LED_PIN);
-    
-    // Initialiser l'écran TFT
-    Serial.println("Initialisation TFT...");
+
+    // Initialiser TFT
     tft.init();
-    tft.setRotation(1); // Paysage
+    tft.setRotation(1);  // Paysage
     tft.fillScreen(TFT_BLACK);
-    
-    // Calibrer le tactile (valeurs par défaut pour LOLIN TFT 2.4")
+
+    // Calibration tactile
     uint16_t calData[5] = {275, 3620, 264, 3532, 1};
     tft.setTouch(calData);
-    
-    // Initialiser les LEDs WS2812B
+
+    // Initialiser FastLED
     Serial.println("Initialisation WS2812B...");
     FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
     FastLED.setBrightness(255);
     FastLED.clear();
     FastLED.show();
+
+    // Initialiser LVGL
+    lv_init();
+    Serial.println("LVGL initialisé");
+
+    // Configurer le display buffer
+    lv_disp_draw_buf_init(&draw_buf, buf1, buf2, 320 * 10);
+
+    // Configurer le driver d'affichage
+    static lv_disp_drv_t disp_drv;
+    lv_disp_drv_init(&disp_drv);
+    disp_drv.hor_res = 320;
+    disp_drv.ver_res = 240;
+    disp_drv.flush_cb = my_disp_flush;
+    disp_drv.draw_buf = &draw_buf;
+    lv_disp_drv_register(&disp_drv);
+    Serial.println("Display configuré");
+
+    // Configurer le driver tactile avec calibration
+    static lv_indev_drv_t indev_drv;
+    lv_indev_drv_init(&indev_drv);
+    indev_drv.type = LV_INDEV_TYPE_POINTER;
+    indev_drv.read_cb = my_touchpad_read;
+    lv_indev_drv_register(&indev_drv);
+    Serial.println("Tactile configuré (calibration affine)");
     
-    // Dessiner l'interface
-    Serial.println("Création de l'interface...");
-    drawInterface();
+    // ===== FOND GRIS CLAIR =====
+    lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0xD0D0D0), 0);  // Gris clair
+
+    // ===== IMAGE DE FOND =====
+    lv_obj_t *imgFond = lv_img_create(lv_scr_act());
+    lv_img_set_src(imgFond, &fond_lvgl_small);
+    lv_obj_set_pos(imgFond, 120, 0);  // Position en haut à gauche
+    Serial.println("Image de fond chargée");
+
+    // ===== CRÉER L'INTERFACE =====
     
-    Serial.println("=== Système prêt ! ===");
+    // Bouton ON/OFF (gauche)
+    btnOnOff = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(btnOnOff, 80, 50);
+    lv_obj_set_pos(btnOnOff, 20, 10);
+    lv_obj_set_style_bg_color(btnOnOff, lv_color_hex(0xAA0000), 0);  // Rouge par défaut
+    lv_obj_set_style_radius(btnOnOff, 8, 0);
+    lv_obj_add_event_cb(btnOnOff, onoff_btn_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *labelOnOff = lv_label_create(btnOnOff);
+    lv_label_set_text(labelOnOff, "OFF");
+    lv_obj_set_style_text_font(labelOnOff, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(labelOnOff, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(labelOnOff);
+
+    // Bouton - (milieu gauche)
+    btnMinus = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(btnMinus, 50, 50);
+    lv_obj_set_pos(btnMinus, 120, 10);
+    lv_obj_set_style_bg_color(btnMinus, lv_color_hex(0xDD6600), 0);  // Orange
+    lv_obj_set_style_radius(btnMinus, 8, 0);
+    lv_obj_add_event_cb(btnMinus, minus_btn_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *labelMinus = lv_label_create(btnMinus);
+    lv_label_set_text(labelMinus, "-");
+    lv_obj_set_style_text_font(labelMinus, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(labelMinus, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(labelMinus);
+
+    // Bouton + (milieu droit)
+    btnPlus = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(btnPlus, 50, 50);
+    lv_obj_set_pos(btnPlus, 180, 10);
+    lv_obj_set_style_bg_color(btnPlus, lv_color_hex(0x00AA00), 0);  // Vert
+    lv_obj_set_style_radius(btnPlus, 8, 0);
+    lv_obj_add_event_cb(btnPlus, plus_btn_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *labelPlus = lv_label_create(btnPlus);
+    lv_label_set_text(labelPlus, "+");
+    lv_obj_set_style_text_font(labelPlus, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(labelPlus, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(labelPlus);
+
+    // Label "LEDs" et compteur (droite)
+    lv_obj_t *labelLeds = lv_label_create(lv_scr_act());
+    lv_label_set_text(labelLeds, "LEDs");
+    lv_obj_set_style_text_font(labelLeds, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(labelLeds, lv_color_hex(0xEB02A5), 0);
+    lv_obj_set_pos(labelLeds, 240, 15);
+    
+    labelLedCount = lv_label_create(lv_scr_act());
+    lv_label_set_text(labelLedCount, "16/16");
+    lv_obj_set_style_text_font(labelLedCount, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(labelLedCount, lv_color_hex(0xEB02A5), 0);
+    lv_obj_set_pos(labelLedCount, 240, 35);
+
+    // ===== DEUXIÈME RANGÉE: TEMPÉRATURE =====
+    
+    // Bouton < température (gauche)
+    btnTempLeft = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(btnTempLeft, 50, 50);
+    lv_obj_set_pos(btnTempLeft, 30, 90);
+    lv_obj_set_style_bg_color(btnTempLeft, lv_color_hex(0x444444), 0);  // Gris foncé
+    lv_obj_set_style_radius(btnTempLeft, 8, 0);
+    lv_obj_add_event_cb(btnTempLeft, temp_left_btn_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *labelTempLeft = lv_label_create(btnTempLeft);
+    lv_label_set_text(labelTempLeft, "<");
+    lv_obj_set_style_text_font(labelTempLeft, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(labelTempLeft, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(labelTempLeft);
+
+    // Bouton > température (droite)
+    btnTempRight = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(btnTempRight, 50, 50);
+    lv_obj_set_pos(btnTempRight, 160, 90);
+    lv_obj_set_style_bg_color(btnTempRight, lv_color_hex(0x444444), 0);  // Gris foncé
+    lv_obj_set_style_radius(btnTempRight, 8, 0);
+    lv_obj_add_event_cb(btnTempRight, temp_right_btn_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *labelTempRight = lv_label_create(btnTempRight);
+    lv_label_set_text(labelTempRight, ">");
+    lv_obj_set_style_text_font(labelTempRight, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(labelTempRight, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_center(labelTempRight);
+
+    // Label "Temp" (centre)
+    labelTemp = lv_label_create(lv_scr_act());
+    lv_label_set_text(labelTemp, "Temp");
+    lv_obj_set_style_text_font(labelTemp, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(labelTemp, lv_color_hex(0xEB02A5), 0);
+    lv_obj_set_pos(labelTemp, 95, 90);
+
+    // Valeur température
+    labelTempValue = lv_label_create(lv_scr_act());
+    ColorPreset ct = colorTemps[colorTemp];
+    lv_label_set_text(labelTempValue, ct.name);
+    lv_obj_set_style_text_font(labelTempValue, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(labelTempValue, lv_color_hex(0xEB02A5), 0);
+    lv_obj_set_pos(labelTempValue, 90, 110);
+
+    // Aperçu couleur (cercle)
+    colorPreview = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(colorPreview, 30, 30);
+    lv_obj_set_pos(colorPreview, 105, 145);
+    lv_obj_set_style_radius(colorPreview, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(colorPreview, lv_color_make(ct.r, ct.g, ct.b), 0);
+    lv_obj_set_style_border_width(colorPreview, 0, 0);
+
+    // ===== SLIDER DE PUISSANCE =====
+    
+    // Titre "Puissance"
+    lv_obj_t *labelPuissance = lv_label_create(lv_scr_act());
+    lv_label_set_text(labelPuissance, "Puissance");
+    lv_obj_set_style_text_font(labelPuissance, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(labelPuissance, lv_color_hex(0xEB02A5), 0);
+    lv_obj_set_pos(labelPuissance, 20, 190);
+
+    // Slider
+    slider = lv_slider_create(lv_scr_act());
+    lv_obj_set_size(slider, 280, 20);
+    lv_obj_set_pos(slider, 20, 210);
+    lv_slider_set_range(slider, 1, 10);
+    lv_slider_set_value(slider, brightness, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0xFFD700), LV_PART_INDICATOR);  // Or
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0xFFD700), LV_PART_KNOB);
+    lv_obj_add_event_cb(slider, slider_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // Valeur en %
+    labelBrightness = lv_label_create(lv_scr_act());
+    String percent = String(brightness * 10) + "%";
+    lv_label_set_text(labelBrightness, percent.c_str());
+    lv_obj_set_style_text_font(labelBrightness, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(labelBrightness, lv_color_hex(0xEB02A5), 0);
+    lv_obj_set_pos(labelBrightness, 140, 212);
+
+    Serial.println("=== Interface créée ===");
 }
 
 void loop() {
-    uint16_t touchX, touchY;
-    bool isTouched = tft.getTouch(&touchX, &touchY);
-    unsigned long currentTime = millis();
-    
-    // Vérifier si l'écran est touché
-    if (isTouched) {
-        if (debugTouch) {
-            // Afficher les coordonnées en haut de l'écran
-            tft.fillRect(0, 0, 320, 30, TFT_BLACK);
-            tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-            tft.setTextDatum(TL_DATUM);
-            tft.drawString("X:" + String(touchX) + " Y:" + String(touchY), 5, 5, 2);
-            Serial.print("Touch X:");
-            Serial.print(touchX);
-            Serial.print(" Y:");
-            Serial.println(touchY);
-        }
-        
-        bool needsUpdate = false;
-        int currentButton = -1;
-        uint8_t newBrightness = 0;
-        
-        // Vérifier d'abord le slider
-        if (isTouchInSlider(touchX, touchY, newBrightness)) {
-            if (newBrightness != brightness) {
-                brightness = newBrightness;
-                Serial.print("Puissance: ");
-                Serial.print(brightness * 10);
-                Serial.println("%");
-                needsUpdate = true;
-            }
-        }
-        // Déterminer quel bouton est touché
-        else if (isTouchInButton(btnOnOff, touchX, touchY)) {
-            currentButton = 0;
-        } else if (isTouchInButton(btnPlus, touchX, touchY)) {
-            currentButton = 1;
-        } else if (isTouchInButton(btnMinus, touchX, touchY)) {
-            currentButton = 2;
-        } else if (isTouchInButton(btnTempLeft, touchX, touchY)) {
-            currentButton = 3;
-        } else if (isTouchInButton(btnTempRight, touchX, touchY)) {
-            currentButton = 4;
-        }
-        
-        // Nouveau toucher ou changement de bouton
-        if (currentButton != lastTouchButton) {
-            lastTouchButton = currentButton;
-            touchStartTime = currentTime;
-            lastActionTime = currentTime;
-            
-            // Exécuter l'action immédiatement pour le premier toucher
-            if (currentButton == 0) {
-                ledsOn = !ledsOn;
-                Serial.println(ledsOn ? "LEDs ON" : "LEDs OFF");
-                needsUpdate = true;
-            } else if (currentButton == 1 && numLedsActive < 16) {
-                numLedsActive++;
-                Serial.print("LEDs actives: ");
-                Serial.println(numLedsActive);
-                needsUpdate = true;
-            } else if (currentButton == 2 && numLedsActive > 1) {
-                numLedsActive--;
-                Serial.print("LEDs actives: ");
-                Serial.println(numLedsActive);
-                needsUpdate = true;
-            } else if (currentButton == 3 && colorTemp > 0) {
-                colorTemp--;
-                Serial.print("Température: ");
-                Serial.println(colorTemps[colorTemp].name);
-                needsUpdate = true;
-            } else if (currentButton == 4 && colorTemp < 2) {
-                colorTemp++;
-                Serial.print("Température: ");
-                Serial.println(colorTemps[colorTemp].name);
-                needsUpdate = true;
-            }
-        }
-        // Toucher maintenu - répétition automatique
-        else if (currentButton != -1 && currentButton != 0) {  // Pas de répétition pour ON/OFF
-            unsigned long timeSinceStart = currentTime - touchStartTime;
-            unsigned long timeSinceLastAction = currentTime - lastActionTime;
-            
-            // Attendre le délai initial, puis répéter à intervalles réguliers
-            if (timeSinceStart > REPEAT_INITIAL_DELAY && timeSinceLastAction > REPEAT_RATE) {
-                lastActionTime = currentTime;
-                
-                if (currentButton == 1 && numLedsActive < 16) {
-                    numLedsActive++;
-                    Serial.print("LEDs actives: ");
-                    Serial.println(numLedsActive);
-                    needsUpdate = true;
-                } else if (currentButton == 2 && numLedsActive > 1) {
-                    numLedsActive--;
-                    Serial.print("LEDs actives: ");
-                    Serial.println(numLedsActive);
-                    needsUpdate = true;
-                } else if (currentButton == 3 && colorTemp > 0) {
-                    colorTemp--;
-                    Serial.print("Température: ");
-                    Serial.println(colorTemps[colorTemp].name);
-                    needsUpdate = true;
-                } else if (currentButton == 4 && colorTemp < 2) {
-                    colorTemp++;
-                    Serial.print("Température: ");
-                    Serial.println(colorTemps[colorTemp].name);
-                    needsUpdate = true;
-                }
-            }
-        }
-        
-        if (needsUpdate) {
-            updateLEDs();
-            drawInterface();
-        }
-    } else {
-        // Plus de toucher - réinitialiser
-        lastTouchButton = -1;
-    }
-    
-    delay(50);
+    lv_tick_inc(5);       // Incrémenter le tick LVGL (5ms par cycle)
+    lv_timer_handler();  // Gestion LVGL
+    delay(5);             // LVGL a besoin d'être appelé régulièrement
 }

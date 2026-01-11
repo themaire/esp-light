@@ -24,9 +24,10 @@ fi
 echo -e "${YELLOW}Sélectionnez le microcontrôleur :${NC}"
 echo "1) ESP8266 (Wemos D1 Mini)"
 echo "2) ESP32 (WEMOS LOLIN D32 PRO)"
-echo "3) Les deux (avec nettoyage entre)"
+echo "3) ESP32 + LVGL"
+echo "4) Les deux standards (ESP8266 + ESP32)"
 echo ""
-read -p "Votre choix [1-3] : " choice
+read -p "Votre choix [1-4] : " choice
 
 # Fonction de build
 build_platform() {
@@ -84,10 +85,18 @@ case $choice in
         fi
         ;;
     3)
+        echo -e "${YELLOW}⚠️  Test LVGL - Version expérimentale${NC}"
+        echo -e "${YELLOW}⚠️  Nécessite ESP32 (520KB RAM) + câble SH1.0 bien connecté${NC}"
+        read -p "Continuer ? [O/n] : " continue
+        if [[ $continue != "n" && $continue != "N" ]]; then
+            build_platform "lolin_d32_pro_lvgl" "ESP32 + LVGL (Expérimental)"
+        fi
+        ;;
+    4)
         build_platform "d1_mini" "ESP8266 (D1 Mini)"
         echo ""
         echo -e "${YELLOW}⚠️  Changement de plateforme : ESP32${NC}"
-        echo -e "${YELLOW}⚠️  Vérifiez que le câble SH1.0 est bien connecté !${NC}"
+        echo -e "${YELLOW}⚠️  Vérifiez que le câble SH1.0 (WEMOS TFT) est bien connecté !${NC}"
         read -p "Continuer avec ESP32 ? [O/n] : " continue
         if [[ $continue != "n" && $continue != "N" ]]; then
             build_platform "lolin_d32_pro" "ESP32 (LOLIN D32 PRO)"

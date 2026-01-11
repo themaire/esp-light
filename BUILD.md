@@ -93,6 +93,9 @@ pio run -e lolin_d32_pro -t upload
 # 3. Vérifier le bon microcontrôleur dans le moniteur série
 pio device monitor -e lolin_d32_pro
 # Vous devriez voir : "Microcontrôleur: ESP32 (LOLIN D32 PRO)"
+
+# Bonus : En cas d'incohérences, videz le cache du compilateur. Puis recompilez
+pio run -e lolin_d32_pro_lvgl -t clean && pio run -e lolin_d32_pro_lvgl -t upload
 ```
 
 ## 🔍 Différences entre ESP8266 et ESP32

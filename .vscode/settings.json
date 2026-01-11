@@ -1,0 +1,4 @@
+{
+    "C_Cpp.default.configurationProvider": "platformio.platformio-ide",
+    "platformio.autoPreloadEnvName": "lolin_d32_pro_lvgl"
+}
