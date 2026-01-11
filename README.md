@@ -37,6 +37,12 @@ pip install platformio esptool
 
 [![Démonstration ESP Light](https://img.youtube.com/vi/Rhpj27oxEJo/maxresdefault.jpg)](https://www.youtube.com/watch?v=Rhpj27oxEJo)
 
+## Versions de l'interface en fonction du microcontrolleur
+
+### ESP32 en utilisant la bibliothèque graphique LGVL
+![](./picts/UI_4.jpg)
+
+### L'ESP8266 n'a pas assez de RAM (ou je ne sais pas comment faire...) pour supporter la bibliothèque LGVL. Version avec des formes de base de la bibliothèque qui gère l'écran.
 ![](./picts/UI_1.jpg)
 ![](./picts/UI_2.jpg)
 ![](./picts/UI_3.jpg)
