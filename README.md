@@ -53,11 +53,18 @@ pip install platformio esptool
 
 ## 📦 Hardware
 
-- **Microcontrôleur** : [ESP8266 (Wemos D1 Mini)](https://fr.aliexpress.com/item/32529101036.html) - 80MHz, 80KB RAM, 4MB Flash
+### Microcontrôleurs supportés
+- **ESP8266** : [Wemos D1 Mini](https://fr.aliexpress.com/item/32529101036.html) - 80MHz, 80KB RAM, 4MB Flash ✅ *Testé et validé*
+- **ESP32** : [WEMOS LOLIN D32 PRO](https://fr.aliexpress.com/item/32883116057.html) - 240MHz, 520KB RAM, 4MB Flash ⚠️ *À tester* (voir [BUILD.md](BUILD.md) pour la configuration)
+### Affichage et LEDs
 - **Écran** : [LOLIN TFT 2.4" Shield (ILI9341 240x320, 16-bit color)](https://fr.aliexpress.com/item/32919729730.html?pdp_npi=4%40dis%21EUR%21€%2017%2C04%21€%2016%2C99%21%21%2119.38%2119.32%21%4021038e4017681636976566811db158%2166057397051%21sh%21FR%211709736453%21X&spm=a2g0o.store_pc_home.productList_2009695634913.32919729730&gatewayAdapt=glo2fra)
-- **Capteur tactile (intégré dans l'écran LILIN TFT)** : XPT2046 (résistif, nécessite calibration)
-- **LEDs** : [Anneau 16 LEDs WS2812B](https://fr.aliexpress.com/item/1005007748593752.html) sur GPIO4 (D2)
-- **Port série** : `/dev/tty.usbserial-0206A689` (sur mon ordinateur) @ 115200 bauds
+- **Capteur tactile (intégré dans l'écran LOLIN TFT)** : XPT2046 (résistif, nécessite calibration)
+- **Câble SPI Wemos (avec le D32 PRO sur son connecteur dédié)** [TFT e-Paper Cable 10P 200mm 20cm for WEMOS SH1.0 10P double head cable](https://fr.aliexpress.com/item/32848833474.html?pdp_npi=4%40dis%21EUR%21€%201%2C42%21€%201%2C42%21%21%211.62%211.62%21%400b88ac9117681662923822001d3b83%2165172187020%21sh%21FR%211709736453%21X&spm=a2g0o.store_pc_home.productList_2009695634917.32848833474&gatewayAdapt=glo2fra)
+- **LEDs** : [Anneau 16 LEDs WS2812B](https://fr.aliexpress.com/item/1005007748593752.html) sur GPIO4 (D2 pour ESP8266) ou GPIO23 (ESP32)
+
+### Port série
+- **ESP8266** : `/dev/tty.usbserial-0206A689` (sur mon ordinateur) @ 115200 bauds
+- **ESP32** : Détection automatique @ 115200 bauds
 
 ## 🎨 Interface
 
@@ -137,16 +144,37 @@ pip install platformio esptool
 ```
 
 ### 2. Compilation et Upload
+
+#### Pour ESP8266 (D1 Mini)
 ```bash
 # Compiler
-pio run
+pio run -e d1_mini
 
 # Compiler et uploader
-pio run -t upload
+pio run -e d1_mini -t upload
 
 # Moniteur série
-pio device monitor --baud 115200
+pio device monitor -e d1_mini
 ```
+
+#### Pour ESP32 (LOLIN D32 PRO)
+⚠️ **Important** : Vérifier et adapter les pins dans `platformio.ini` avant de compiler !
+
+```bash
+# Nettoyer le cache (OBLIGATOIRE lors du changement de plateforme)
+pio run -t clean
+
+# Compiler
+pio run -e lolin_d32_pro
+
+# Compiler et uploader
+pio run -e lolin_d32_pro -t upload
+
+# Moniteur série
+pio device monitor -e lolin_d32_pro
+```
+
+📖 **Guide complet** : Voir [BUILD.md](BUILD.md) pour les détails de configuration ESP32.
 
 ## 📁 Structure du projet
 
@@ -164,7 +192,7 @@ esp-light/
 
 ## 🔧 Configuration matérielle
 
-### Broches TFT Shield
+### Broches TFT Shield (ESP8266 - D1 Mini)
 | Pin D1 Mini | GPIO | Fonction |
 |-------------|------|----------|
 | D0 | 16 | TFT_CS |
@@ -174,10 +202,44 @@ esp-light/
 | D7 | 13 | MOSI |
 | D8 | 15 | TFT_DC |
 
+### Broches TFT Shield (ESP32 - LOLIN D32 PRO)
+
+**Connexion via câble SH1.0-10P (10 fils) fourni par WEMOS**
+
+Le D32 PRO dispose d'un connecteur **TFT_LCD** dédié qui se connecte directement à l'écran LOLIN TFT 2.4" avec un câble spécial **SH1.0-10-L1** ([TFT e-Paper Cable 10P 200mm](https://fr.aliexpress.com/item/32848833474.html)).
+
+#### Mapping des GPIO (câble 10 fils)
+
+| Pin Câble | GPIO D32 | Fonction | Pin Écran TFT | Description |
+|-----------|----------|----------|---------------|-------------|
+| 1 | IO12 | TOUCH_CS | TS_CS | Chip Select capteur tactile XPT2046 |
+| 2 | IO14 | TFT_CS | CS (pin 5) | Chip Select écran LCD ILI9341 |
+| 3 | - | GND | GND | Masse commune |
+| 4 | IO18 | SCK | SCK (pin 3) | Horloge SPI (partagée LCD + tactile) |
+| 5 | IO19 | MISO | MISO (pin 7) | SPI Master In Slave Out |
+| 6 | IO23 | MOSI | MOSI (pin 6) | SPI Master Out Slave In |
+| 7 | IO27 | TFT_DC | DC (pin 4) | Data/Command LCD |
+| 8 | IO33 | TFT_RST | RST (pin 2) | Reset LCD |
+| 9 | - | +3V3 | VCC | Alimentation 3.3V |
+| 10 | IO32 | TFT_LED | LED+/LED- | Contrôle rétroéclairage (PWM) |
+
+#### Pourquoi 10 fils seulement ?
+
+L'écran a 18 pins mais le câble n'en utilise que 10 car :
+- **Bus SPI partagé** : MISO/MOSI/SCK sont communs à l'écran LCD et au capteur tactile XPT2046
+- **Tactile intégré** : Les 4 fils tactiles (XL/YU/XR/YD) sont gérés par la puce XPT2046 sur l'écran, exposant uniquement un signal TS_CS
+- **Rétroéclairage simplifié** : LED+/LED- sont contrôlés par un seul fil PWM (TFT_LED)
+- **GND et VCC** : Alimentation commune
+
+✅ **Avantage** : Connexion plug-and-play, aucun câblage manuel !
+
 ### LEDs WS2812B
-- **GPIO** : D2 (GPIO4)
+- **ESP8266** : D2 (GPIO4)
+- **ESP32** : GPIO25 (libre, pas de conflit avec le bus SPI)
 - **Nombre** : 16 LEDs en anneau
-- **Alimentation** : 5V (via D1 Mini ou externe)
+- **Alimentation** : 5V (via microcontrôleur ou externe)
+
+⚠️ **Note ESP32** : IO23 (MOSI) est utilisé par l'écran, donc les LEDs WS2812B doivent être connectées sur **GPIO25** pour éviter tout conflit.
 
 ## 📚 Bibliothèques utilisées
 

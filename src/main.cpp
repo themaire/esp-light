@@ -2,12 +2,22 @@
 #include <TFT_eSPI.h>
 #include <FastLED.h>
 
-// ===== CONFIGURATION =====
+// ===== CONFIGURATION MULTI-PLATEFORME =====
+// Détection automatique du microcontrôleur
+#if defined(ESP8266_BOARD)
+    #define MCU_NAME "ESP8266 (D1 Mini)"
+    // LED_PIN défini dans platformio.ini (GPIO4 = D2)
+#elif defined(ESP32_BOARD)
+    #define MCU_NAME "ESP32 (LOLIN D32 PRO)"
+    // LED_PIN défini dans platformio.ini (GPIO23 par défaut)
+#else
+    #error "Plateforme non supportée ! Utiliser ESP8266_BOARD ou ESP32_BOARD"
+#endif
+
 // Écran TFT LOLIN 2.4"
 TFT_eSPI tft = TFT_eSPI();
 
 // LEDs WS2812B
-#define LED_PIN D2          // GPIO4 sur Wemos D1 Mini (D4 est utilisé par TFT)
 #define NUM_LEDS 16         // Anneau de 16 LEDs
 CRGB leds[NUM_LEDS];
 
@@ -238,7 +248,11 @@ void drawInterface() {
 void setup() {
     Serial.begin(115200);
     delay(100);
-    Serial.println("\n=== Selfie Light Pro - ESP8266 ===");
+    Serial.println("\n=== Selfie Light Pro ===");
+    Serial.print("Microcontrôleur: ");
+    Serial.println(MCU_NAME);
+    Serial.print("LED Pin: GPIO");
+    Serial.println(LED_PIN);
     
     // Initialiser l'écran TFT
     Serial.println("Initialisation TFT...");
