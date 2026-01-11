@@ -2,6 +2,12 @@
 
 Système d'éclairage LED contrôlable avec interface tactile pour photographie.
 
+Projet non terminé car il reste à concevoir la partie à imprimer en 3D qui servira de boitier / support.
+
+## 🎥 Vidéo de démonstration
+
+[![Démonstration ESP Light](https://img.youtube.com/vi/Rhpj27oxEJo/maxresdefault.jpg)](https://www.youtube.com/watch?v=Rhpj27oxEJo)
+
 ![](./picts/UI_1.jpg)
 ![](./picts/UI_2.jpg)
 ![](./picts/UI_3.jpg)
